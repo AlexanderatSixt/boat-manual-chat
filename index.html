@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Boat Manual Chat</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; max-width: 900px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    textarea { width: 100%; min-height: 90px; padding: 12px; border-radius: 10px; border: 1px solid #ccc; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .muted { color: #666; font-size: 14px; }
+    .cit { font-size: 14px; color: #222; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: #444; }
+  </style>
+</head>
+<body>
+  <h1>Boat Manual Chat</h1>
+  <p class="muted">Calls your Cloud Run backend and shows grounded citations.</p>
+
+  <div class="card">
+    <div class="row">
+      <label class="muted">Backend URL</label>
+      <input id="baseUrl" class="mono" style="flex:1; min-width: 360px; padding:10px; border-radius:10px; border:1px solid #ccc"
+             value="https://boat-rag-backend-309277234754.europe-west1.run.app" />
+      <button id="saveBtn">Save</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <label class="muted">Question</label>
+    <textarea id="q" placeholder="Ask something from the manual..."></textarea>
+    <div class="row" style="margin-top:10px;">
+      <button id="askBtn">Ask</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Answer</h3>
+    <div id="answer" style="white-space: pre-wrap;"></div>
+  </div>
+
+  <div class="card">
+    <h3>Citations</h3>
+    <div id="cites"></div>
+  </div>
+
+<script>
+  const els = {
+    baseUrl: document.getElementById("baseUrl"),
+    saveBtn: document.getElementById("saveBtn"),
+    q: document.getElementById("q"),
+    askBtn: document.getElementById("askBtn"),
+    status: document.getElementById("status"),
+    answer: document.getElementById("answer"),
+    cites: document.getElementById("cites"),
+  };
+
+  function getBaseUrl() {
+    const v = (localStorage.getItem("baseUrl") || els.baseUrl.value || "").trim();
+    return v.replace(/\/+$/, ""); // strip trailing slash
+  }
+
+  function setStatus(msg) { els.status.textContent = msg || ""; }
+
+  els.saveBtn.onclick = () => {
+    localStorage.setItem("baseUrl", els.baseUrl.value.trim());
+    setStatus("Saved backend URL.");
+    setTimeout(() => setStatus(""), 1200);
+  };
+
+  // Load saved URL
+  const saved = localStorage.getItem("baseUrl");
+  if (saved) els.baseUrl.value = saved;
+
+  els.askBtn.onclick = async () => {
+    const baseUrl = getBaseUrl();
+    const message = (els.q.value || "").trim();
+    if (!message) return;
+
+    els.askBtn.disabled = true;
+    setStatus("Calling /chat ...");
+    els.answer.textContent = "";
+    els.cites.innerHTML = "";
+
+    try {
+      const resp = await fetch(`${baseUrl}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message })
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data?.detail ? JSON.stringify(data.detail) : JSON.stringify(data));
+      }
+
+      els.answer.textContent = data.answer || "(empty)";
+
+      const cites = Array.isArray(data.citations) ? data.citations : [];
+      if (!cites.length) {
+        els.cites.innerHTML = `<div class="muted">No citations returned.</div>`;
+      } else {
+        els.cites.innerHTML = cites.map(c =>
+          `<div class="cit" style="margin: 10px 0;">
+             <div class="mono">Page ${c.page}</div>
+             <div>${(c.snippet || "").replaceAll("<","&lt;").replaceAll(">","&gt;")}</div>
+           </div>`
+        ).join("");
+      }
+
+      setStatus("Done.");
+      setTimeout(() => setStatus(""), 1200);
+    } catch (e) {
+      setStatus("Error.");
+      els.answer.textContent = String(e);
+    } finally {
+      els.askBtn.disabled = false;
+    }
+  };
+</script>
+</body>
+</html>
