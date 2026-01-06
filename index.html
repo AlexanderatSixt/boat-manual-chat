@@ -544,293 +544,306 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script>
-    const els = {
-      baseUrl: document.getElementById("baseUrl"),
-      saveBtn: document.getElementById("saveBtn"),
-      testBtn: document.getElementById("testBtn"),
-      settings: document.getElementById("settings"),
-      settingsHint: document.getElementById("settingsHint"),
+  <!-- STEP 1 FIX: Replace ONLY your <script>...</script> block with this one.
+     This makes button wiring deterministic and failure-visible. -->
+<script>
+  "use strict";
 
-      connDot: document.getElementById("connDot"),
-      connText: document.getElementById("connText"),
+  // ---------- Helpers ----------
+  const STORAGE = { baseUrl: "baseUrl", chat: "chatHistory_v1" };
+  const DEFAULT_BASE = "https://boat-rag-backend-309277234754.europe-west1.run.app";
 
-      chatBody: document.getElementById("chatBody"),
-      q: document.getElementById("q"),
-      sendBtn: document.getElementById("sendBtn"),
-      resetBtn: document.getElementById("resetBtn"),
+  function safeBaseUrl(v){ return String(v || "").trim().replace(/\/+$/, ""); }
 
-      headHint: document.getElementById("headHint"),
-      runtimeHint: document.getElementById("runtimeHint"),
+  function escapeHtml(s){
+    return String(s || "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;");
+  }
 
-      toast: document.getElementById("toast")
-    };
+  function $(id){
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`Missing element #${id}`);
+    return el;
+  }
 
-    const STORAGE = {
-      baseUrl: "baseUrl",
-      chat: "chatHistory_v1"
-    };
+  function nowTime(){
+    const d = new Date();
+    return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  }
 
-    const DEFAULT_BASE = "https://boat-rag-backend-309277234754.europe-west1.run.app";
+  // ---------- DOM lookup (single source of truth; no duplicate keys) ----------
+  const els = {};
+  function wireDom(){
+    els.baseUrl       = $("baseUrl");
+    els.saveBtn       = $("saveBtn");
+    els.testBtn       = $("testBtn");
+    els.settings      = $("settings");
+    els.settingsHint  = $("settingsHint");
 
-    function toast(msg){
-      els.toast.textContent = msg || "";
-      if (!msg) return;
-      els.toast.classList.add("show");
-      clearTimeout(toast._t);
-      toast._t = setTimeout(()=>els.toast.classList.remove("show"), 1400);
-    }
+    els.connDot       = $("connDot");
+    els.connText      = $("connText");
 
-    function safeBaseUrl(v){
-      v = (v || "").trim();
-      return v.replace(/\/+$/, "");
-    }
+    els.chatBody      = $("chatBody");
+    els.q             = $("q");
+    els.sendBtn       = $("sendBtn");
+    els.resetBtn      = $("resetBtn");
 
-    function getBaseUrl(){
-      const v = localStorage.getItem(STORAGE.baseUrl) || els.baseUrl.value || DEFAULT_BASE;
-      return safeBaseUrl(v);
-    }
+    els.headHint      = $("headHint");
+    els.runtimeHint   = $("runtimeHint");
 
-    function setConn(state, text){
-      els.connDot.classList.remove("ok","bad");
-      if (state === "ok") els.connDot.classList.add("ok");
-      if (state === "bad") els.connDot.classList.add("bad");
-      els.connText.textContent = text || "";
-    }
+    els.toast         = $("toast");
+  }
 
-    function escapeHtml(s){
-      return String(s || "")
-        .replaceAll("&","&amp;")
-        .replaceAll("<","&lt;")
-        .replaceAll(">","&gt;");
-    }
+  // ---------- UI ----------
+  function toast(msg){
+    els.toast.textContent = msg || "";
+    if (!msg) return;
+    els.toast.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(()=>els.toast.classList.remove("show"), 1400);
+  }
 
-    function nowTime(){
-      const d = new Date();
-      return d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
-    }
+  function setConn(state, text){
+    els.connDot.classList.remove("ok","bad");
+    if (state === "ok") els.connDot.classList.add("ok");
+    if (state === "bad") els.connDot.classList.add("bad");
+    els.connText.textContent = text || "";
+  }
 
-    function scrollToBottom(){
-      els.chatBody.scrollTop = els.chatBody.scrollHeight + 9999;
-    }
+  function scrollToBottom(){
+    els.chatBody.scrollTop = els.chatBody.scrollHeight + 9999;
+  }
 
-    function loadChat(){
-      try{
-        const raw = localStorage.getItem(STORAGE.chat);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) return [];
-        return parsed.filter(m => m && typeof m.role === "string" && typeof m.content === "string");
-      } catch { return []; }
-    }
+  function autoGrow(){
+    els.q.style.height = "auto";
+    els.q.style.height = Math.min(170, els.q.scrollHeight) + "px";
+  }
 
-    function saveChat(history){
-      try{
-        localStorage.setItem(STORAGE.chat, JSON.stringify(history.slice(-30)));
-      } catch {}
-    }
+  // ---------- Persistence ----------
+  function loadChat(){
+    try{
+      const raw = localStorage.getItem(STORAGE.chat);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(m => m && typeof m.role === "string" && typeof m.content === "string");
+    } catch { return []; }
+  }
 
-    function clearChat(){
-      localStorage.removeItem(STORAGE.chat);
-      els.chatBody.innerHTML = "";
-      els.headHint.textContent = "Stell deine Frage zum Handbuch.";
-      els.runtimeHint.textContent = "";
-      toast("Chat zurückgesetzt.");
-      els.q.focus();
-    }
+  function saveChat(history){
+    try{ localStorage.setItem(STORAGE.chat, JSON.stringify(history.slice(-30))); } catch {}
+  }
 
-    function renderMessage({role, content, citations, meta}){
-      const wrap = document.createElement("div");
-      wrap.className = "msg " + (role === "user" ? "user" : "assistant");
+  function clearChat(){
+    localStorage.removeItem(STORAGE.chat);
+    els.chatBody.innerHTML = "";
+    els.headHint.textContent = "Stell deine Frage zum Handbuch.";
+    els.runtimeHint.textContent = "";
+    toast("Chat zurückgesetzt.");
+    els.q.focus();
+  }
 
-      const bubble = document.createElement("div");
-      bubble.className = "bubble";
-      bubble.innerHTML = escapeHtml(content);
+  // ---------- Rendering ----------
+  function renderMessage({role, content, citations, meta}){
+    const wrap = document.createElement("div");
+    wrap.className = "msg " + (role === "user" ? "user" : "assistant");
 
-      wrap.appendChild(bubble);
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.innerHTML = escapeHtml(content);
 
-      // assistant extras
-      if (role !== "user") {
-        const metaRow = document.createElement("div");
-        metaRow.className = "meta";
-        metaRow.innerHTML = `
-          <span class="tag"><strong>Antwort</strong> · ${nowTime()}</span>
-          ${meta?.model ? `<span class="tag">LLM: <span class="mono">${escapeHtml(meta.model)}</span></span>` : ""}
-          ${meta?.embed_model ? `<span class="tag">Embed: <span class="mono">${escapeHtml(meta.embed_model)}</span></span>` : ""}
-        `;
+    wrap.appendChild(bubble);
 
-        const container = document.createElement("div");
-        container.style.maxWidth = "min(720px, 100%)";
-        container.appendChild(bubble);
-        container.appendChild(metaRow);
+    if (role !== "user"){
+      const metaRow = document.createElement("div");
+      metaRow.className = "meta";
+      metaRow.innerHTML = `
+        <span class="tag"><strong>Antwort</strong> · ${nowTime()}</span>
+        ${meta?.model ? `<span class="tag">LLM: <span class="mono">${escapeHtml(meta.model)}</span></span>` : ""}
+        ${meta?.embed_model ? `<span class="tag">Embed: <span class="mono">${escapeHtml(meta.embed_model)}</span></span>` : ""}
+      `;
 
-        // citations collapsed
-        const cites = Array.isArray(citations) ? citations : [];
-        const d = document.createElement("details");
-        d.className = "cite-wrap";
-        d.open = false;
+      const container = document.createElement("div");
+      container.style.maxWidth = "min(720px, 100%)";
+      container.appendChild(bubble);
+      container.appendChild(metaRow);
 
-        const sum = document.createElement("summary");
-        sum.innerHTML = `
-          <span class="cite-title">Quellen (${cites.length})</span>
-          <span class="chev" aria-hidden="true"></span>
-        `;
-        d.appendChild(sum);
+      const cites = Array.isArray(citations) ? citations : [];
+      const d = document.createElement("details");
+      d.className = "cite-wrap";
+      d.open = false;
 
-        const body = document.createElement("div");
-        body.className = "cite-body";
-        if (!cites.length){
-          body.innerHTML = `<div class="small">Keine Quellen zurückgegeben.</div>`;
-        } else {
-          body.innerHTML = cites.map(c => `
-            <div class="cite">
-              <div class="page">Seite ${escapeHtml(c.page)}</div>
-              <div class="snip">
-                ${escapeHtml(c.snippet || "")}
-              </div>
-            </div>
-          `).join("");
-        }
-        d.appendChild(body);
+      const sum = document.createElement("summary");
+      sum.innerHTML = `
+        <span class="cite-title">Quellen (${cites.length})</span>
+        <span class="chev" aria-hidden="true"></span>
+      `;
+      d.appendChild(sum);
 
-        container.appendChild(d);
-
-        // replace wrap bubble with container (still aligned by wrap)
-        wrap.replaceChild(container, bubble);
-      }
-
-      els.chatBody.appendChild(wrap);
-      scrollToBottom();
-    }
-
-    async function testConnection(){
-      const base = getBaseUrl();
-      setConn("","prüfe …");
-      try{
-        const t0 = performance.now();
-        const resp = await fetch(`${base}/openapi.json`, { method:"GET" });
-        const dt = Math.round(performance.now() - t0);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        setConn("ok", `ok · ${dt}ms`);
-        toast("Backend erreichbar.");
-      } catch (e){
-        setConn("bad", "fehler");
-        toast("Backend nicht erreichbar.");
-      }
-    }
-
-    async function sendMessage(){
-      const base = getBaseUrl();
-      const message = (els.q.value || "").trim();
-      if (!message) return;
-
-      // optimistic UI
-      renderMessage({role:"user", content: message});
-      els.q.value = "";
-      autoGrow();
-
-      els.sendBtn.disabled = true;
-      els.headHint.textContent = "Denke nach …";
-      const t0 = performance.now();
-
-      // keep a small history (backend may ignore today, but future-proof)
-      const history = loadChat();
-      const outbound = history.concat([{role:"user", content: message}]).slice(-12);
-
-      try{
-        const resp = await fetch(`${base}/chat`, {
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ message, history: outbound })
-        });
-
-        let data = null;
-        try { data = await resp.json(); } catch { data = null; }
-
-        if (!resp.ok) {
-          const detail = data?.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : JSON.stringify(data || {});
-          throw new Error(detail || `HTTP ${resp.status}`);
-        }
-
-        const answer = (data?.answer || "").trim() || "(leer)";
-        const cites = Array.isArray(data?.citations) ? data.citations : [];
-        const meta = { model: data?.model, embed_model: data?.embed_model };
-
-        renderMessage({role:"assistant", content: answer, citations: cites, meta});
-
-        // persist history
-        const nextHistory = outbound.concat([{role:"assistant", content: answer}]).slice(-30);
-        saveChat(nextHistory);
-
-        const dt = Math.round(performance.now() - t0);
-        els.runtimeHint.textContent = `Antwortzeit: ${dt}ms`;
-        els.headHint.textContent = "Stell deine nächste Frage zum Handbuch.";
-      } catch (e){
-        const msg = String(e?.message || e || "Unbekannter Fehler");
-        renderMessage({role:"assistant", content: `Fehler: ${msg}`, citations: [], meta: {}});
-        els.headHint.textContent = "Fehler beim Abruf. Prüfe Backend-Adresse oder versuche es erneut.";
-      } finally{
-        els.sendBtn.disabled = false;
-        els.q.focus();
-      }
-    }
-
-    function autoGrow(){
-      const ta = els.q;
-      ta.style.height = "auto";
-      ta.style.height = Math.min(170, ta.scrollHeight) + "px";
-    }
-
-    // Init
-    (function init(){
-      const saved = localStorage.getItem(STORAGE.baseUrl);
-      els.baseUrl.value = safeBaseUrl(saved || DEFAULT_BASE);
-      els.settingsHint.textContent = safeBaseUrl(els.baseUrl.value);
-
-      // restore chat transcript visually (simple)
-      const hist = loadChat();
-      if (hist.length){
-        hist.forEach(m => renderMessage({role:m.role, content:m.content, citations:[], meta:{}}));
-        els.headHint.textContent = "Fortgesetzt. Stell deine nächste Frage.";
+      const body = document.createElement("div");
+      body.className = "cite-body";
+      if (!cites.length){
+        body.innerHTML = `<div class="small">Keine Quellen zurückgegeben.</div>`;
       } else {
-        renderMessage({
-          role:"assistant",
-          content: "Hallo Käpt'n Goetz. Stell mir 'ne Frage zum Handbuch – und ick bring dir die Seiten dazu.",
-          citations: [],
-          meta: {}
-        });
+        body.innerHTML = cites.map(c => `
+          <div class="cite">
+            <div class="page">Seite ${escapeHtml(c.page)}</div>
+            <div class="snip">${escapeHtml(c.snippet || "")}</div>
+          </div>
+        `).join("");
+      }
+      d.appendChild(body);
+      container.appendChild(d);
+
+      wrap.replaceChild(container, bubble);
+    }
+
+    els.chatBody.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  // ---------- Backend ----------
+  function getBaseUrl(){
+    const v = localStorage.getItem(STORAGE.baseUrl) || els.baseUrl.value || DEFAULT_BASE;
+    return safeBaseUrl(v);
+  }
+
+  async function testConnection(){
+    const base = getBaseUrl();
+    setConn("", "prüfe …");
+    try{
+      const t0 = performance.now();
+      const resp = await fetch(`${base}/openapi.json`, { method:"GET" });
+      const dt = Math.round(performance.now() - t0);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      setConn("ok", `ok · ${dt}ms`);
+      toast("Backend erreichbar.");
+    } catch {
+      setConn("bad", "fehler");
+      toast("Backend nicht erreichbar.");
+    }
+  }
+
+  async function sendMessage(){
+    const base = getBaseUrl();
+    const message = (els.q.value || "").trim();
+    if (!message) return;
+
+    renderMessage({role:"user", content: message});
+    els.q.value = "";
+    autoGrow();
+
+    els.sendBtn.disabled = true;
+    els.headHint.textContent = "Denke nach …";
+    const t0 = performance.now();
+
+    const history = loadChat();
+    const outbound = history.concat([{role:"user", content: message}]).slice(-12);
+
+    try{
+      const resp = await fetch(`${base}/chat`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ message, history: outbound })
+      });
+
+      let data = null;
+      try { data = await resp.json(); } catch { data = null; }
+
+      if (!resp.ok){
+        const detail = data?.detail
+          ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail))
+          : JSON.stringify(data || {});
+        throw new Error(detail || `HTTP ${resp.status}`);
       }
 
-      testConnection();
-      els.q.focus();
-      autoGrow();
-    })();
+      const answer = (data?.answer || "").trim() || "(leer)";
+      const cites = Array.isArray(data?.citations) ? data.citations : [];
+      const meta = { model: data?.model, embed_model: data?.embed_model };
 
-    // Handlers
-    els.saveBtn.onclick = () => {
+      renderMessage({role:"assistant", content: answer, citations: cites, meta});
+
+      const nextHistory = outbound.concat([{role:"assistant", content: answer}]).slice(-30);
+      saveChat(nextHistory);
+
+      const dt = Math.round(performance.now() - t0);
+      els.runtimeHint.textContent = `Antwortzeit: ${dt}ms`;
+      els.headHint.textContent = "Stell deine nächste Frage zum Handbuch.";
+    } catch (e){
+      renderMessage({role:"assistant", content: `Fehler: ${String(e?.message || e)}`, citations: [], meta: {}});
+      els.headHint.textContent = "Fehler beim Abruf. Prüfe Backend-Adresse oder versuche es erneut.";
+    } finally{
+      els.sendBtn.disabled = false;
+      els.q.focus();
+    }
+  }
+
+  // ---------- Event binding (deterministic) ----------
+  function bindEvents(){
+    // buttons
+    els.saveBtn.addEventListener("click", () => {
       const v = safeBaseUrl(els.baseUrl.value);
       els.baseUrl.value = v;
       localStorage.setItem(STORAGE.baseUrl, v);
       els.settingsHint.textContent = v;
       toast("Gespeichert.");
       testConnection();
-    };
+    });
 
-    els.testBtn.onclick = () => testConnection();
+    els.testBtn.addEventListener("click", testConnection);
+    els.resetBtn.addEventListener("click", clearChat);
 
-    els.resetBtn.onclick = () => clearChat();
+    // IMPORTANT: bind send exactly once
+    els.sendBtn.addEventListener("click", sendMessage);
 
-    els.sendBtn.onclick = () => sendMessage();
-
+    // keyboard send
     els.q.addEventListener("input", autoGrow);
-
     els.q.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey){
         e.preventDefault();
         sendMessage();
       }
     });
+  }
 
-  </script>
+  // ---------- Init (runs after DOM exists) ----------
+  function init(){
+    wireDom();
+
+    // base URL restore
+    const saved = localStorage.getItem(STORAGE.baseUrl);
+    els.baseUrl.value = safeBaseUrl(saved || DEFAULT_BASE);
+    els.settingsHint.textContent = safeBaseUrl(els.baseUrl.value);
+
+    // render previous history (simple transcript)
+    const hist = loadChat();
+    if (hist.length){
+      hist.forEach(m => renderMessage({role:m.role, content:m.content, citations:[], meta:{}}));
+      els.headHint.textContent = "Fortgesetzt. Stell deine nächste Frage.";
+    } else {
+      renderMessage({
+        role:"assistant",
+        content: "Hallo Käpt'n Goetz. Stell mir 'ne Frage zum Handbuch – und ick bring dir die Seiten dazu.",
+        citations: [],
+        meta: {}
+      });
+    }
+
+    bindEvents();
+    autoGrow();
+    els.q.focus();
+    testConnection();
+  }
+
+  // Ensure init runs at the right time even if script moves
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  } else {
+    init();
+  }
+</script>
+
 </body>
 </html>
