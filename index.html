@@ -628,7 +628,12 @@
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter(m => m && typeof m.role === "string" && typeof m.content === "string");
+      return parsed
+        .filter(m => m && typeof m.role === "string" && typeof m.content === "string")
+        .map(m => ({
+            role: (m.role === "user" ? "user" : "assistant"),
+            content: m.content
+        }));
     } catch { return []; }
   }
 
